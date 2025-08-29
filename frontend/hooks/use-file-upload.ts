@@ -3,6 +3,7 @@ import { useState } from "react";
 interface UploadResult {
   success: boolean;
   data: {
+    id?: string;
     path: string;
     publicUrl: string;
     originalName: string;

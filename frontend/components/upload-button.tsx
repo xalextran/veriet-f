@@ -3,10 +3,12 @@
 import { Button } from "@/components/ui/button";
 import { Upload, Loader2 } from "lucide-react";
 import { useFileUpload } from "@/hooks/use-file-upload";
+import { useInvalidateFiles } from "@/hooks/use-files";
 import { toast } from "sonner";
 
 export function UploadButton() {
   const { uploadFile, uploading } = useFileUpload();
+  const invalidateFiles = useInvalidateFiles();
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -18,7 +20,8 @@ export function UploadButton() {
         description: `${result.data.originalName} has been uploaded to your library.`,
       });
       
-      // TODO: Refresh file list or update global state
+      // Invalidate files cache to refresh the library
+      invalidateFiles();
       console.log("Upload successful:", result);
     } catch (error) {
       toast.error("Upload failed", {
@@ -49,12 +52,12 @@ export function UploadButton() {
         <label htmlFor="file-upload">
           {uploading ? (
             <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
               Uploading...
             </>
           ) : (
             <>
-              <Upload className="h-4 w-4 mr-2" />
+              <Upload className="h-4 w-4" />
               Upload File
             </>
           )}

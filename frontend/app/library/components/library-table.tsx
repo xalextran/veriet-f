@@ -1,15 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   ColumnDef,
-  ColumnFiltersState,
   SortingState,
   flexRender,
   getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,71 +31,12 @@ import {
   ChevronRight,
   FileText,
   Image,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Loader2
 } from "lucide-react";
-
-// Define the file data structure
-export type FileData = {
-  id: string;
-  name: string;
-  type: string; // Business type: Invoice, Contract, etc.
-  fileFormat: string; // File format: PDF, DOCX, etc.
-  size: string;
-  folder: string;
-  uploadDate: string;
-};
-
-// Generate realistic dummy data
-const generateDummyData = (): FileData[] => {
-  const businessTypes = ["Invoice", "Contract", "Receipt", "Report", "Proposal", "Agreement"];
-  const fileFormats = ["PDF", "DOCX", "XLSX", "JPG", "PNG"];
-  const folders = [
-    "Financial Documents > Invoices",
-    "Legal Documents > Contracts", 
-    "Expenses > Receipts",
-    "Reports > Monthly",
-    "Projects > Proposals",
-    "HR > Agreements",
-    "Marketing > Assets",
-    "Operations > Reports"
-  ];
-  
-  const files: FileData[] = [];
-  
-  for (let i = 1; i <= 20; i++) {
-    const businessType = businessTypes[Math.floor(Math.random() * businessTypes.length)];
-    const fileFormat = fileFormats[Math.floor(Math.random() * fileFormats.length)];
-    const folder = folders[Math.floor(Math.random() * folders.length)];
-    
-    // Generate realistic file sizes
-    const sizeNum = Math.floor(Math.random() * 50000) + 100; // 100B to 50MB
-    let size: string;
-    if (sizeNum < 1024) {
-      size = `${sizeNum} B`;
-    } else if (sizeNum < 1024 * 1024) {
-      size = `${(sizeNum / 1024).toFixed(1)} KB`;
-    } else {
-      size = `${(sizeNum / (1024 * 1024)).toFixed(1)} MB`;
-    }
-    
-    // Generate dates within the last 6 months
-    const daysAgo = Math.floor(Math.random() * 180);
-    const uploadDate = new Date();
-    uploadDate.setDate(uploadDate.getDate() - daysAgo);
-    
-    files.push({
-      id: `file_${i}`,
-      name: `${businessType.toLowerCase()}_${i.toString().padStart(3, '0')}.${fileFormat.toLowerCase()}`,
-      type: businessType,
-      fileFormat,
-      size,
-      folder,
-      uploadDate: uploadDate.toISOString().split('T')[0], // YYYY-MM-DD format
-    });
-  }
-  
-  return files;
-};
+import { useFiles, type FileData } from "@/hooks/use-files";
+import { useDebounce } from "@/hooks/use-debounce";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // File format color mapping (Big 4 strategy)
 const getFileFormatColor = (format: string) => {
@@ -134,11 +71,55 @@ const getFileFormatIcon = (format: string) => {
 };
 
 export function LibraryTable() {
-  const [data] = useState<FileData[]>(generateDummyData());
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [rowSelection, setRowSelection] = useState({});
+  const [pageIndex, setPageIndex] = useState(0);
+  const pageSize = 10;
+
+  // Debounce search input to avoid excessive API calls
+  const debouncedSearch = useDebounce(globalFilter, 300);
+
+  // Reset page when search or sorting changes
+  useEffect(() => {
+    setPageIndex(0);
+  }, [debouncedSearch, sorting]);
+
+  // Fetch data with React Query
+  const { 
+    data: filesResponse, 
+    isLoading, 
+    error,
+    isError 
+  } = useFiles({
+    page: pageIndex + 1,
+    limit: pageSize,
+    search: debouncedSearch || undefined, // Use debounced value for API
+    sortBy: sorting[0]?.id || "uploadDate", // Use the column ID directly
+    sortOrder: sorting[0]?.desc ? "desc" : "asc",
+  });
+
+  const data = filesResponse?.data || [];
+  const pagination = filesResponse?.pagination;
+
+  // Show search loading when there's a difference between input and debounced value
+  const isSearching = globalFilter !== debouncedSearch && globalFilter.length > 0;
+
+  // Loading skeleton component
+  const LoadingSkeleton = () => (
+    <div className="space-y-4">
+      {Array.from({ length: pageSize }).map((_, i) => (
+        <div key={i} className="flex items-center space-x-4">
+          <Skeleton className="h-4 w-4" />
+          <Skeleton className="h-4 flex-1" />
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-4 w-24" />
+        </div>
+      ))}
+    </div>
+  );
 
   // Define table columns
   const columns: ColumnDef<FileData>[] = [
@@ -296,33 +277,53 @@ export function LibraryTable() {
     data,
     columns,
     onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
     getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     onRowSelectionChange: setRowSelection,
-    globalFilterFn: (row, columnId, filterValue) => {
-      const searchableColumns = ['name', 'folder'];
-      return searchableColumns.some(column => {
-        const value = row.getValue(column) as string;
-        return value?.toLowerCase().includes(filterValue.toLowerCase());
-      });
-    },
     state: {
       sorting,
-      columnFilters,
       globalFilter,
       rowSelection,
-      pagination: {
-        pageIndex: 0,
-        pageSize: 10,
-      },
     },
+    manualPagination: true, // We handle pagination server-side
+    manualFiltering: true, // We handle search server-side
+    manualSorting: true, // We handle sorting server-side
+    pageCount: pagination?.totalPages || 0,
     columnResizeMode: 'onChange',
     enableColumnResizing: false,
   });
+
+  // Handle loading state
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="relative flex-1">
+              <Skeleton className="h-10 w-full" />
+            </div>
+          </div>
+          <LoadingSkeleton />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Handle error state
+  if (isError) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="text-center py-8 text-red-500">
+            <p>Failed to load files. Please try again.</p>
+            <p className="text-sm text-muted-foreground mt-2">
+              {error?.message || "An unknown error occurred"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -331,11 +332,14 @@ export function LibraryTable() {
         <div className="flex items-center gap-2 mb-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            {isSearching && (
+              <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />
+            )}
             <Input
               placeholder="Search files and folders..."
               value={globalFilter ?? ""}
               onChange={(event) => setGlobalFilter(event.target.value)}
-              className="pl-10"
+              className={`pl-10 ${isSearching ? 'pr-10' : ''}`}
             />
           </div>
         </div>
@@ -404,27 +408,26 @@ export function LibraryTable() {
         <div className="flex items-center justify-between space-x-2 py-4">
           <div className="text-sm text-muted-foreground">
             {table.getFilteredSelectedRowModel().rows.length} of{" "}
-            {table.getFilteredRowModel().rows.length} row(s) selected.
+            {pagination?.total || 0} row(s) selected.
           </div>
           <div className="flex items-center space-x-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
+              onClick={() => setPageIndex(Math.max(0, pageIndex - 1))}
+              disabled={pageIndex === 0}
             >
               <ChevronLeft className="h-4 w-4" />
               Previous
             </Button>
             <div className="text-sm text-muted-foreground">
-              Page {table.getState().pagination.pageIndex + 1} of{" "}
-              {table.getPageCount()}
+              Page {pageIndex + 1} of {pagination?.totalPages || 1}
             </div>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
+              onClick={() => setPageIndex(pageIndex + 1)}
+              disabled={pageIndex >= (pagination?.totalPages || 1) - 1}
             >
               Next
               <ChevronRight className="h-4 w-4" />

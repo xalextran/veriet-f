@@ -71,9 +71,57 @@ export async function POST(request: NextRequest) {
       .from("documents")
       .getPublicUrl(filePath);
 
+    // Save metadata to database
+    const { data: dbData, error: dbError } = await supabase
+      .from("documents")
+      .insert({
+        document_id: documentId,
+        workspace_id: workspaceId,
+        user_id: userId,
+        original_name: file.name,
+        file_name: fileName,
+        file_path: filePath,
+        public_url: urlData.publicUrl,
+        file_size: file.size,
+        file_type: file.type,
+        file_extension: fileExtension || "",
+        processing_status: "uploaded",
+      })
+      .select()
+      .single();
+
+    if (dbError) {
+      console.error("Database insert error:", dbError);
+      // File was uploaded but metadata failed - this is recoverable
+      // In production, you might want to queue this for retry
+    }
+
+    // Trigger document processing (Phase 1: keep upload in frontend, add processing)
+    if (dbData?.id) {
+      try {
+        // Call processing service asynchronously (don't wait for completion)
+        fetch(`${process.env.PROCESSING_SERVICE_URL}/process`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            document_id: documentId,
+            file_path: filePath,
+            workspace_id: workspaceId,
+          }),
+        }).catch(err => {
+          console.error("Failed to trigger processing:", err);
+          // Could queue for retry here
+        });
+      } catch (error) {
+        console.error("Processing trigger error:", error);
+        // Don't fail the upload if processing trigger fails
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: {
+        id: dbData?.id,
         path: data.path,
         publicUrl: urlData.publicUrl,
         originalName: file.name,
@@ -81,7 +129,7 @@ export async function POST(request: NextRequest) {
         type: file.type,
         documentId,
         workspaceId,
-        userId, // Include for debugging
+        userId,
         uploadedAt: new Date().toISOString(),
       },
     });
